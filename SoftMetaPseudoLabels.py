@@ -125,7 +125,7 @@ for i in range(epochs):
     loss_list.append(acc / (_ * batch_size_test))
     torch.cuda.empty_cache()
 
-
+# declare model, optimizer
 student = Model().to(device)
 soptimizer = torch.optim.Adam(student.parameters(), lr=.0001)
 loss_list2 = []
@@ -133,37 +133,38 @@ loss_list2 = []
 # student training
 for i in range(epochs):
     t = tqdm(enumerate(zip(unsupervised_loader, train_loader)), position=0, leave=True)
-    for c, ((x, y), (x2, y2)) in t:  # loop through supervised and unsupervised data at same time
-
+    for c, ((x,y), (x2, y2)) in t: # loop through supervised and unsupervised data at same time
+        
         # as paper proposes, alternate between unsupervised method and supervised freqently, we do this every cycle
-
+        
         # unsupervised, teacher teaches student
         x = x.to(device)
         y_hat = teacher(x)
         pred = student(x)
 
-        loss = criterion(pred, y_hat.argmax(axis=1))
+        loss = torch.nn.MSELoss()(pred, y_hat) # use L2 loss here even though paper 
         loss.backward()
 
         soptimizer.step()
         soptimizer.zero_grad()
-
+        
         torch.cuda.empty_cache()
         gc.collect()
-
+        
+        
         # supervised, trickle through whole graph
         pred = student(x2.to(device))
 
         loss = criterion(pred, y2.to(device))
         loss.backward()
-
+        
         t.set_description_str(str(loss.cpu().detach().numpy()))
-
+        
         soptimizer.step()
         toptimizer.step()
         toptimizer.zero_grad()
         soptimizer.zero_grad()
-
+        
         torch.cuda.empty_cache()
         gc.collect()
 
@@ -175,8 +176,8 @@ for i in range(epochs):
             if i.argmax(axis=0) == y[l].to(device):
                 acc += 1
 
-    print(acc / (_ * batch_size_test))
-    loss_list.append(acc / (_ * batch_size_test))
+    print(acc/(_*batch_size_test))
+    loss_list.append(acc/(_*batch_size_test))
     torch.cuda.empty_cache()
     acc = 0
     for _, (x, y) in enumerate(test_loader):
@@ -185,17 +186,18 @@ for i in range(epochs):
             if i.argmax(axis=0) == y[l].to(device):
                 acc += 1
 
-    print(acc / (_ * batch_size_test))
-    loss_list2.append(acc / (_ * batch_size_test))
+    print(acc/(_*batch_size_test))
+    loss_list2.append(acc/(_*batch_size_test))
     torch.cuda.empty_cache()
 
-
-
+# print lists
 print("teacher: ", loss_list)
 print("student: ", loss_list2)
 
 import matplotlib.pyplot as plt
 
+# plot lists on chart, longer line is teacher because list includes previous training
+# teacher advancing past set epoch amount shows it is working
 plt.plot(range(len(loss_list)), loss_list)
 plt.plot(range(len(loss_list2)), loss_list2)
 plt.show()
