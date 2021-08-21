@@ -6,7 +6,7 @@ import gc
 from tqdm import tqdm
 
 #parameters
-epochs = 20
+epochs = 30
 batch_size_train = 256
 batch_size_test = 512
 device = "cuda"
