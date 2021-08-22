@@ -16,6 +16,8 @@ teacher's relation to the student's weights:
 
 The teacher's relation to the student's weights is broken down using REINFORCE into two dependencies of the student and one dependency of the teacher, from this state it can be
 encoded into python.
+
+
 ![image](https://user-images.githubusercontent.com/49009243/130339521-96dddb59-d7a6-4e92-891a-4ceacabd0ed5.png)
 
 
