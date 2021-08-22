@@ -12,6 +12,7 @@ backprop through the student model for the soft labels script, but a novel metho
 The Hard label script uses two main equations to backtrace student loss to the teacher. The backtrace equations are simply more compuationally efficient derrivations of this basic
 equation which breaks down the problem into a simple chain rule equation where the gradient of the teacher in relation to the student is simply the student's gradient times the
 teacher's relation to the student's weights:
+
 ![image](https://user-images.githubusercontent.com/49009243/130339482-322280d5-8f42-4a29-ba45-c87f5d711469.png)
 
 The teacher's relation to the student's weights is broken down using REINFORCE into two dependencies of the student and one dependency of the teacher, from this state it can be
