@@ -4,10 +4,11 @@ import torchvision
 import numpy as np
 import gc
 from tqdm import tqdm
+import torchvision.transforms as transforms
 
 #parameters
-epochs = 3
-batch_size_train = 128
+epochs = 40
+batch_size_train = 256
 batch_size_test = 256
 device = "cuda"
 lr = .0001
@@ -16,13 +17,15 @@ lr = .0001
 random_seed = 1
 torch.manual_seed(random_seed)
 
+trans = transforms.Compose([
+    transforms.Resize(256),
+    transforms.CenterCrop(224),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])])
+
 # datasets
 trainset =   torchvision.datasets.CIFAR10('/files/', train=True, download=True,
-                             transform=torchvision.transforms.Compose([
-                               torchvision.transforms.ToTensor(),
-                               torchvision.transforms.Normalize(
-                                 (0.1307,), (0.3081,))
-                             ]))
+                             transform=trans)
 
 trainset_c = trainset
 trainset.data = trainset.data[25000:]
@@ -41,59 +44,20 @@ train_loader = torch.utils.data.DataLoader(trainset,batch_size=batch_size_train,
 # here I am just sifoning a portion of the labeled data and stripping its labels
 unsupervised_loader = torch.utils.data.DataLoader(trainset_c,batch_size=batch_size_train, shuffle=True)
 
+
+
 test_loader = torch.utils.data.DataLoader(
-  torchvision.datasets.CIFAR10('/files/', train=False, download=True,
-                             transform=torchvision.transforms.Compose([
-                               torchvision.transforms.ToTensor(),
-                               torchvision.transforms.Normalize(
-                                 (0.1307,), (0.3081,))
-                             ])),
-  batch_size=batch_size_test, shuffle=True)
+  torchvision.datasets.CIFAR10('/files/', train=False, download=True, transform=trans), batch_size=batch_size_test, shuffle=True)
 
-class Model(nn.Module):
-    def __init__(self):
-        super(Model, self).__init__()
-        self.list = nn.ModuleList([])
-
-        # slightly more lightweight version of AlexNet - 2 less layers, less depth in FCs
-        
-        self.list.append(nn.Conv2d(3, 64, (5, 5), stride=(2,2)))
-        self.list.append(nn.ReLU())
-        self.list.append(nn.BatchNorm2d(64))
-
-        self.list.append(nn.Conv2d(64, 256, (5,5), stride=2))
-        self.list.append(nn.ReLU())
-        self.list.append(nn.BatchNorm2d(256))
-
-        self.list.append(nn.Conv2d(256, 384, (3,3), stride=1))
-        self.list.append(nn.ReLU())
-        self.list.append(nn.BatchNorm2d(384))
-        
-        self.list.append(nn.Conv2d(384, 256, (3,3), stride=1))
-        self.list.append(nn.ReLU())
-        self.list.append(nn.BatchNorm2d(256))
-        
-        self.list.append(nn.Flatten())
-        self.list.append(nn.Linear(256, 1028))
-        self.list.append(nn.ReLU())
-        self.list.append(nn.BatchNorm1d(1028))
-        
-        self.list.append(nn.Linear(1028, 512))
-        self.list.append(nn.ReLU())
-        self.list.append(nn.BatchNorm1d(512))
-        
-        self.list.append(nn.Linear(512, 10))
-        self.list.append(nn.Softmax())
-
-    def forward(self, x):
-        for l in self.list:
-            x = l(x)
-        return x
-    
 del trainset_c, trainset
 gc.collect()
+teacher = torch.hub.load('pytorch/vision:v0.6.0', 'alexnet', pretrained=False).to(device)
+teacher.classifier[1] = nn.Linear(9216,4096)
+teacher.classifier[4] = nn.Linear(4096,1024)
+teacher.classifier[6] = nn.Linear(1024,10)
 
-teacher = Model().to(device)
+teacher = teacher.to(device)
+
 criterion = nn.CrossEntropyLoss()
 
 toptimizer = torch.optim.Adam(teacher.parameters(), lr=.0001)
@@ -102,8 +66,8 @@ toptimizer = torch.optim.Adam(teacher.parameters(), lr=.0001)
 # model size, no performace difference but hard harder to imp
 loss_list = []
 # teacher training
-for i in range(epochs):
-    t = tqdm(train_loader)
+for i in range(20):
+    t = tqdm(train_loader, position=0, leave=True)
     for (x, y) in t:
         pred = teacher(x.to(device))
 
@@ -125,11 +89,15 @@ for i in range(epochs):
     print(acc/(_*batch_size_test))
     loss_list.append(acc/(_*batch_size_test))
     torch.cuda.empty_cache()
-   
-student = Model().to(device)
+    
+student = torch.hub.load('pytorch/vision:v0.6.0', 'alexnet', pretrained=False).to(device)
+student.classifier[1] = nn.Linear(9216,4096)
+student.classifier[4] = nn.Linear(4096,1024)
+student.classifier[6] = nn.Linear(1024,10)
+
 soptimizer = torch.optim.Adam(student.parameters(), lr=.0001)
 loss_list2 = []
-
+student = student.to(device)
 # student training
 for i in range(epochs):
     t = tqdm(enumerate(zip(unsupervised_loader, train_loader)), position=0, leave=True)
@@ -148,7 +116,7 @@ for i in range(epochs):
         # compute h - the teacher's feedback coefficient
         # reconstruct each theta's update from how it updates after calling a soptim.step()
         w_list = [] # theta timstep=t gradients on yhat preds
-        for param in student.list:
+        for param in student.modules():
             #print(param)
             try:
                 w_list.append(param.weight.grad.flatten())
@@ -174,9 +142,9 @@ for i in range(epochs):
         if c == 0:
             continue
         
-        # sum up h, which is the product of the student gradients(on real and pseudo labels), with the gradient of the real y being first and transformed
+        # sum up h, which is the product of the gradients, with the gradient of the real y being first adn transformed
         r_list = [] # theta timstep=t gradients on yhat preds
-        for _, param in enumerate(student.list):
+        for _, param in enumerate(student.modules()):
             #print(param)
             try:
                 r_list.append(param.weight.grad.flatten())
@@ -188,8 +156,8 @@ for i in range(epochs):
         for _ in range(len(r_list)):
             #print(r_list[_].shape, w_list[_].shape)
             h += lr*torch.matmul((r_list[_].reshape([r_list[_].size()[0], 1]).T),(w_list[_].reshape([w_list[_].size()[0], 1])))
+            
         
-        # clear memory
         torch.cuda.empty_cache()
         gc.collect()
         
@@ -198,9 +166,9 @@ for i in range(epochs):
         Tloss = criterion(y_hat, y_hat.detach().argmax(axis=1))
         Tloss.backward()
         
-        # calculate and save teacher gradients on unsupervised material with h approximation to backtrace student stack
+        # calculate teacher gradients on unsupervised material with h approximation to backtrace student stack
         ugrad = []
-        for param in teacher.list:
+        for param in teacher.modules():
             try:
                 ugrad.append(h*param.weight.grad)
             except:
@@ -214,7 +182,7 @@ for i in range(epochs):
         Rloss.backward()
         
         rgrad = []
-        for _, param in enumerate(teacher.list):
+        for _, param in enumerate(teacher.modules()):
             try:
                 param.weight.grad = param.weight.grad + ugrad[_]
             except:
@@ -222,14 +190,13 @@ for i in range(epochs):
             
         # the paper calls for an optional UDA update but that is in an appendix, and it is not at the root of the paper so I did not impliment it here
         
-        # update teacher with ugradient and supervised gradient
         toptimizer.step()
         toptimizer.zero_grad()
         
         torch.cuda.empty_cache()
         gc.collect()
-    
-    # calculate accuracy of student and teacher every epoch, save to losslists
+
+    # find accuracy of models and save it
     loss = 0
     acc = 0
     for _, (x, y) in enumerate(test_loader):
@@ -252,7 +219,7 @@ for i in range(epochs):
     loss_list2.append(acc/(_*batch_size_test))
     torch.cuda.empty_cache()
     
-# visualize student and teacher accuracy per epoch
+# print lists, plot data
 print("teacher: ", loss_list)
 print("student: ", loss_list2)
 
